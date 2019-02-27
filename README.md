@@ -116,7 +116,9 @@ optional arguments:
                         (default is to report all substring matches) (default:
                         None)
   -j, --json            output as JSON lines (default is TSV) (default: False)
-(dedup) $ ./matching_substrings.py duplicates.tsv -j | jq .
+(dedup) $ find test -name "*.txt" | ./dedup.py - -r 0.33 -b 128 | ./matching_substrings.py - -j | jq .
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 1655.68files/s]
+100%|████████████████████████████████████████████████████████████████████████████████████████████| 128/128 [00:00<00:00, 12382.85rotations/s]
 {
   "1.filename": "test/1.txt",
   "2.filename": "test/2.txt",
