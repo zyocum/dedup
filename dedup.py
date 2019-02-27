@@ -4,11 +4,9 @@
 
 import sys
 
-from collections import deque
 from operator import attrgetter
 
 from cityhash import CityHash32, CityHash64, CityHash128
-from scipy.spatial.distance import hamming, cosine
 from tqdm import tqdm
 
 tqdm.monitor_interval = 0
@@ -19,7 +17,7 @@ HASHSIZE = {
     CityHash128: 128,
 }
 
-HASHES = {size: hashf for (hashf, size) in HASHSIZE.items()}
+HASHES = {bits: hashf for (hashf, bits) in HASHSIZE.items()}
 
 def ngrams(iterable, n=1):
     """Generate ngrams from an iterable
@@ -33,11 +31,32 @@ def ngrams(iterable, n=1):
     """
     return zip(*(iterable[i:] for i in range(n)))
 
+def rotate(n, rotations=1, width=32):
+    """Bitwise rotate an int.
+    
+    bin(rotate(1, rotations=0))  ->                                '0b1'
+    bin(rotate(1, rotations=1))  -> '0b10000000000000000000000000000000'
+    bin(rotate(1, rotations=2))  ->  '0b1000000000000000000000000000000'
+    bin(rotate(1, rotations=32)) ->                                '0b1'
+    bin(rotate(1, rotations=31)) ->                               '0b10'
+    bin(rotate(1, rotations=-1)) ->                               '0b10'
+    bin(rotate(1, rotations=1, width=8)) ->                 '0b10000000'
+    bin(rotate(1, rotations=8, width=8)) ->                        '0b1'
+    
+    """
+    width = max(n.bit_length(), width)
+    rotations %= width
+    if rotations < 1:
+        return n
+    mask = 2 ** width - 1
+    n &= mask
+    return (n >> rotations) | ((n << (width - rotations) & mask))
+
 def simhash(text, n=2, hashf=CityHash32):
     """Simhash implementation using an underlying, fast string-hash: cityhash"""
     lsh = [0] * HASHSIZE[hashf]
     if not text:
-        return hash_vector
+        return 0
     for ngram in ngrams(text, n=n):
         hash_ = hashf(''.join(ngram))
         for i, _ in enumerate(lsh):
@@ -45,12 +64,23 @@ def simhash(text, n=2, hashf=CityHash32):
                 lsh[i] += 1
             else:
                 lsh[i] -= 1
-    return [int(b > 0) for b in lsh]
+    return sum(int(b > 0) << i for (i, b) in enumerate(reversed(lsh)))
+
+def simdiff(a, b, bits=32):
+    """Compute the bitwise difference between two simhashes normalized
+    by the length of the longest hash in bits"""
+    if bits < 1:
+        raise ValueError(f'bits must be >= 1 (bits={bits})')
+    xor = a ^ b
+    difference = sum(((xor & (1 << i)) > 0) for i in range(bits))
+    return difference / bits
 
 class Text(object):
     """A class modeling a text document that can be compared for equality
     to other Text instances using simhash (a locality sensitive hash or 
-    LSH) based on character n-grams."""
+    LSH) based on character n-grams.
+    
+    """
     def __init__(
         self,
         filename,
@@ -69,7 +99,7 @@ class Text(object):
         self.n = n
         self.hashf = hashf
         self.threshold = threshold
-        self.lsh = deque(simhash(self.load(), n=self.n, hashf=self.hashf))
+        self.lsh = simhash(self.load(), n=self.n, hashf=self.hashf)
     
     def load(self):
         with open(self.filename, mode='r') as f:
@@ -81,7 +111,8 @@ class Text(object):
         return hash(self.filename)
     
     def __eq__(self, other):
-        return cosine(self.lsh, other.lsh) <= self.threshold
+        diff = simdiff(self.lsh, other.lsh, bits=HASHSIZE[self.hashf])
+        return diff < self.threshold
     
     def __repr__(self):
         return (
@@ -91,12 +122,17 @@ class Text(object):
         )
 
 def document_sorter(document):
+    """A sorting key function that sorts documents by length (descending)
+    and filename (ascending)
+    
+    """
     return -document.size, document.filename
 
 def find_duplicates(
     documents,
     n=2,
-    hashf=CityHash32
+    hashf=CityHash32,
+    show_dupes=False
 ):
     """Find duplicate document sets from a collection of documents.
     
@@ -105,8 +141,9 @@ def find_duplicates(
     given document LSH similarity threshold.
     
     A document must implement __eq__ such that two documents are equivalent
-    if the cosine similarity of their .lsh attributes is within the specified
+    if the similarity of their .lsh attributes is within the specified
     document similarity threshold.
+    
     """
     duplicates = {}
     deduped = set()
@@ -118,15 +155,23 @@ def find_duplicates(
         documents = sorted(documents, key=attrgetter('lsh'))
         for pair in ngrams(documents, n=2):
             a, b = sorted(pair, key=document_sorter)
-            if a == b:
-                if b not in deduped:
-                    deduped.add(b)
-                    if a not in duplicates:
-                        duplicates[a] = {b}
-                    else:
-                        duplicates[a].add(b)
+            if (a, b) not in deduped and (a == b):
+                if show_dupes:
+                    print(a.filename, ':', a.load(), file=sys.stderr)
+                    print(b.filename, ':', b.load(), file=sys.stderr)
+                    print('{:0>128b}'.format(a.lsh), file=sys.stderr)
+                    print('{:0>128b}'.format(b.lsh), file=sys.stderr)
+                    print(
+                        simdiff(a.lsh, b.lsh, bits=HASHSIZE[hashf]),
+                        file=sys.stderr
+                    )
+                deduped.add((a, b))
+                if a not in duplicates:
+                    duplicates[a] = {b}
+                else:
+                    duplicates[a].add(b)
         for document in documents:
-            document.lsh.rotate()
+            document.lsh = rotate(document.lsh, width=HASHSIZE[hashf])
     return duplicates
 
 def main(
@@ -139,7 +184,9 @@ def main(
 ):
     """Find duplicate documents and report the duplicates found.
     Duplicate document pairs are printed to stdout as TSV.
-    To report the number of duplicates found to stderr, set verbose=True."""
+    To report the number of duplicates found to stderr, set verbose=True.
+    
+    """
     documents = []
     for filename in tqdm(
         filenames,
@@ -157,7 +204,8 @@ def main(
     dupe_sets = find_duplicates(
         documents,
         n=n,
-        hashf=hashf
+        hashf=hashf,
+        show_dupes=verbose
     )
     for unique, duplicates in dupe_sets.items():
         if verbose:
@@ -197,8 +245,8 @@ if __name__ == '__main__':
         help='size of character n-grams'
     )
     parser.add_argument(
-        '-s',
-        '--hash-size',
+        '-b',
+        '--bits',
         type=int,
         default=32,
         choices=sorted(HASHES),
@@ -210,8 +258,7 @@ if __name__ == '__main__':
         type=float,
         default=0.25,
         help=(
-            'threshold for how much two documents can differ in their '
-            'LSHs before they are not considered duplicates (lower thresholds '
+            'threshold for considering two LSHs equivalent (lower thresholds '
             'are more strict; higher thresholds are more lenient)'
         )
     )
@@ -228,7 +275,7 @@ if __name__ == '__main__':
     main(
         filenames,
         n=args.n_gram_size,
-        hashf=HASHES[args.hash_size],
+        hashf=HASHES[args.bits],
         threshold=args.threshold,
         verbose=args.verbose
     )
