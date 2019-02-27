@@ -360,7 +360,7 @@ This strategy requires a pass over each of N documents to compute the LSHs, but 
 If we have, say, over 100k documents to compare, performing N choose 2 comparisons becomes very expensive:
 
 ```
-# ~241 days is a long time
+# ~241 hours is a long time
 (dedup) $ find ~/Desktop/words -type f | ./dedup_pairwise.py - > ~/Desktop/duplicates_pairwise.tsv
 100%|███████████████████████████████████████████████████████████████████████████████████████████| 128959/128959 [00:20<00:00, 6251.87files/s]
   0%|                                                                                  | 1272202/8315147361 [01:58<241:35:38, 9559.05pairs/s
