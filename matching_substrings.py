@@ -3,7 +3,7 @@
 """Read pairs of files from stdin and report matching substrings across the
 files.
 
-Ourput is TSV with the following fields:
+Output is TSV with the following fields:
 
     1.filename
     2.filename

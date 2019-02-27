@@ -97,7 +97,7 @@ If you have a list of filename pairs (such as the output from `dedup.py`), then 
 usage: matching_substrings.py [-h] [-r THRESHOLD] [-n MATCHES] [-j] input
 
 Read pairs of files from stdin and report matching substrings across the
-files. Ourput is TSV with the following fields: 1.filename 2.filename
+files. Output is TSV with the following fields: 1.filename 2.filename
 1.startOffset 1.endOffset 2.startOffset 2.endOffset text size or JSON like the
 following: { "1.filename": "/path/to/1.txt", "2.filename": "/path/to/2.txt",
 "1.startOffset": 0, "1.endOffset": 4, "2.startOffset": 10, "2.endOffset": 14,
@@ -353,7 +353,7 @@ test/7.txt	test/6.txt
 found 3 duplicate(s) in total
 ```
 
-After computing an LSH for each document, the list of documents are sorted by their LSH and pairs of adjacent LSHs in the list are compared.  If an adjacent pair's LSHs are similar enough (based on a threshold), then the pair is considered a duplicate.  Considering the sorted list of LSHs once is not sufficient however, because if pair of documents have high bits that differ, but most bits are still the same, they won't be considered, because they will be unlikely to be adjacent in the sorted list.  To mitigate this, each LSH is rotated and the lists of LSHs are sorted again, and again adjacent pairs are checked.
+After computing an LSH for each document, the list of documents are sorted by their LSH and pairs of adjacent LSHs in the list are compared.  If an adjacent pair's LSHs are similar enough (based on a threshold), then the pair is considered a duplicate.  Considering the sorted list of LSHs once is not sufficient however, because if a pair of documents have high bits that differ, but most bits are still the same, they won't be considered, because they will be unlikely to be adjacent in the sorted list.  To mitigate this, each LSH is rotated and the lists of LSHs are sorted again, and again adjacent pairs are checked.
 
 This strategy requires a pass over each of N documents to compute the LSHs, but once the LSHs are computed, it requires only N-1 * M comparisons where M is size of the LSH in bits.  When N is much larger than M, this is a significant improvement in time complexity over the naive approach of comparing N documents pairwise, which would require N choose 2 or N! / 2! * (N - 2)! comparisons.
 
