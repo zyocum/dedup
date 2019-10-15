@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 
-"""Find duplicate text documents from a list of filenames."""
-
+import csv
 import sys
+import json
 
-from operator import attrgetter
+from math import inf
+from operator import itemgetter
+from unicodedata import normalize
 
 from cityhash import CityHash32, CityHash64, CityHash128
+
 from tqdm import tqdm
 
 tqdm.monitor_interval = 0
@@ -66,15 +69,6 @@ def simhash(text, n=2, hashf=CityHash32):
                 lsh[i] -= 1
     return sum(int(b > 0) << i for (i, b) in enumerate(reversed(lsh)))
 
-def simdiff(a, b, bits=32):
-    """Compute the bitwise difference between two simhashes normalized
-    by the length of the longest hash in bits"""
-    if bits < 1:
-        raise ValueError(f'bits must be >= 1 (bits={bits})')
-    xor = a ^ b
-    difference = sum(((xor & (1 << i)) > 0) for i in range(bits))
-    return difference / bits
-
 class Text(object):
     """A class modeling a text document that can be compared for equality
     to other Text instances using simhash (a locality sensitive hash or 
@@ -85,41 +79,42 @@ class Text(object):
         self,
         filename,
         n=2,
-        hashf=CityHash32,
-        threshold=0.25
+        hashf=CityHash128,
+        normalization_form=None
     ):
-        if 1.0 < threshold < 0.0:
-            raise ValueError(
-                (
-                    f'invalid threshold={threshold}; '
-                    'threshold must be in range [0.0..1.0]'
-                )
-            )
         self.filename = filename
         self.n = n
         self.hashf = hashf
-        self.threshold = threshold
+        self.normalization_form = normalization_form
         self.lsh = simhash(self.load(), n=self.n, hashf=self.hashf)
     
     def load(self):
         with open(self.filename, mode='r') as f:
             data = f.read()
+            if self.normalization_form:
+                data = normalize(self.normalization_form, data)
             self.size = len(data)
             return data
     
     def __hash__(self):
         return hash(self.filename)
     
-    def __eq__(self, other):
-        diff = simdiff(self.lsh, other.lsh, bits=HASHSIZE[self.hashf])
-        return diff < self.threshold
-    
     def __repr__(self):
         return (
             f'{self.__class__.__name__}('
-            f'{self.filename}, n={self.n}, hashf={self.hashf.__name__}'
-            f'threshold={self.threshold})'
+            f'{self.filename!r}, n={self.n}, hashf={self.hashf.__name__})'
         )
+
+class ADM(Text):
+    """A class modeling a Basis Technology Annotatded Data Model (ADM)
+    that can be compared for equality to other Text instances using simhash
+    based on character n-grams."""
+    def load(self):
+        with open(self.filename, mode='r') as f:
+            obj = json.loads(f.read())
+            data = obj['data']
+            self.size = len(data)
+            return data
 
 def document_sorter(document):
     """A sorting key function that sorts documents by length (descending)
@@ -128,99 +123,89 @@ def document_sorter(document):
     """
     return -document.size, document.filename
 
-def find_duplicates(
-    documents,
-    n=2,
-    hashf=CityHash32,
-    show_dupes=False
-):
-    """Find duplicate document sets from a collection of documents.
+def simdiff(a, b, bits=128):
+    """Compute the bitwise difference between two simhashes"""
+    if bits < 1:
+        raise ValueError(f'bits must be >= 1 (bits={bits})')
+    xor = a ^ b
+    difference = sum(((xor & (1 << i)) > 0) for i in range(bits))
+    return difference
+
+def pairs(documents, hashf=CityHash128):
+    """Generate duplicate candidate pairs and their minimum bitwise difference
+    scores.
     
-    The return value is a dict whose keys are documents and whose values are
-    sets of documents that are duplicates of the key document according to the
-    given document LSH similarity threshold.
+    The return type is ((a, b), c) where:
     
-    A document must implement __eq__ such that two documents are equivalent
-    if the similarity of their .lsh attributes is within the specified
-    document similarity threshold.
-    
+        a: a document instance that has a .lsh attribute
+        b: a document instance that has a .lsh attribute
+        c: the minimum difference score between all rotations of the LSHs of
+           a and b
     """
-    duplicates = {}
-    deduped = set()
-    for _ in tqdm(
-        range(HASHSIZE[hashf]),
-        unit='rotations',
+    d = {}
+    bits = HASHSIZE[hashf]
+    for i in range(bits):
+        def lsh(document):
+            return rotate(document.lsh, i, width=bits)
+        for a, b in ngrams(
+            sorted(documents, key=lsh),
+            n=2
+        ):
+            a, b = sorted((a, b), key=document_sorter)
+            if (a, b) not in d:
+                d[(a, b)] = simdiff(lsh(a), lsh(b), bits=bits)
+            else:
+                d[(a, b)] = min(
+                    d[(a, b)],
+                    simdiff(lsh(a), lsh(b), bits=bits)
+                )
+    yield from sorted(d.items(), key=itemgetter(1))
+
+def load(
+    filenames,
+    doctype=Text,
+    n=2,
+    hashf=CityHash128,
+    normalization_form=None
+):
+    """Generate doctype instances per filename with a progress bar"""
+    with tqdm(
+        filenames,
+        unit='files',
         dynamic_ncols=True
-    ):
-        documents = sorted(documents, key=attrgetter('lsh'))
-        for pair in ngrams(documents, n=2):
-            a, b = sorted(pair, key=document_sorter)
-            if (a, b) not in deduped and (a == b):
-                if show_dupes:
-                    print(a.filename, ':', a.load(), file=sys.stderr)
-                    print(b.filename, ':', b.load(), file=sys.stderr)
-                    print('{:0>128b}'.format(a.lsh), file=sys.stderr)
-                    print('{:0>128b}'.format(b.lsh), file=sys.stderr)
-                    print(
-                        simdiff(a.lsh, b.lsh, bits=HASHSIZE[hashf]),
-                        file=sys.stderr
-                    )
-                deduped.add((a, b))
-                if a not in duplicates:
-                    duplicates[a] = {b}
-                else:
-                    duplicates[a].add(b)
-        for document in documents:
-            document.lsh = rotate(document.lsh, width=HASHSIZE[hashf])
-    return duplicates
+    ) as progress:
+        for filename in progress:
+            yield doctype(
+                filename,
+                n=n,
+                hashf=hashf,
+                normalization_form=normalization_form
+            )
+
+DOCTYPES = {
+    '.txt': Text,
+    '.adm.json': ADM
+}
 
 def main(
     filenames,
     doctype=Text,
     n=2,
-    hashf=CityHash32,
-    threshold=0.25,
-    verbose=False
+    hashf=CityHash128,
+    normalization_form=None,
+    threshold=inf
 ):
-    """Find duplicate documents and report the duplicates found.
-    Duplicate document pairs are printed to stdout as TSV.
-    To report the number of duplicates found to stderr, set verbose=True.
-    
-    """
-    documents = []
-    for filename in tqdm(
+    documents = load(
         filenames,
-        unit='files',
-        dynamic_ncols=True
-    ):
-        documents.append(
-            doctype(
-                filename,
-                n=n,
-                hashf=hashf,
-                threshold=threshold
-            )
-        )
-    dupe_sets = find_duplicates(
-        documents,
+        doctype=doctype,
         n=n,
         hashf=hashf,
-        show_dupes=verbose
+        normalization_form=normalization_form
     )
-    for unique, duplicates in dupe_sets.items():
-        if verbose:
-            print(
-                (
-                    f'found {len(duplicates)} duplicate(s) of file: '
-                    f' {unique.filename}'
-                ),
-                file=sys.stderr
-            )
-        for duplicate in duplicates:
-            print('\t'.join((unique.filename, duplicate.filename)))
-    if verbose:
-        total = sum((len(ds) for ds in dupe_sets.values()))
-        print(f'found {total} duplicate(s) in total', file=sys.stderr)
+    writer = csv.writer(sys.stdout, dialect=csv.excel_tab)
+    for (a, b), score in pairs(documents, hashf=hashf):
+        if score <= threshold:
+            writer.writerow((a.filename, b.filename, score))
 
 if __name__ == '__main__':
     import argparse
@@ -248,34 +233,56 @@ if __name__ == '__main__':
         '-b',
         '--bits',
         type=int,
-        default=32,
+        default=128,
         choices=sorted(HASHES),
         help='hash size (in bits)'
     )
     parser.add_argument(
         '-r',
         '--threshold',
-        type=float,
-        default=0.25,
+        type=int,
+        default=max(HASHES),
         help=(
-            'threshold for considering two LSHs equivalent (lower thresholds '
-            'are more strict; higher thresholds are more lenient)'
+            'minimum bitwise difference threshold for considering two LSHs '
+            'equivalent (lower thresholds are more strict; higher thresholds '
+            'are more lenient; thresholds must be between 0 and -b/--bits)'
         )
     )
     parser.add_argument(
-        '-v',
-        '--verbose',
-        action='store_true',
-        help='print duplicate counts to stderr',
+        '-f',
+        '--normalization-form',
+        default='NFKD',
+        choices=['NFC', 'NFKC', 'NFD', 'NFKD'],
+        help=(
+            'Unicode normalization option; refer to unicodedata.normalize for '
+            'explanation of options'
+        )
+    )
+    parser.add_argument(
+        '-t',
+        '--doc-type',
+        choices=sorted(DOCTYPES),
+        default='.txt',
+        help='the type of documents to compare'
     )
     args = parser.parse_args()
+    if not (args.threshold <= args.bits):
+        print(
+            (
+                '[INVALID DIFFERENCE THRESHOLD] '
+                f'-r/--threshold={args.threshold} must be '
+                f'less than -b/--bits={args.bits}'
+            ),
+            file=sys.stderr
+        )
+        sys.exit(1)
     filenames = args.filenames.read().splitlines()
     if args.filenames.name != '<stdin>':
         args.filenames.close()
     main(
         filenames,
+        doctype=DOCTYPES[args.doc_type],
         n=args.n_gram_size,
         hashf=HASHES[args.bits],
-        threshold=args.threshold,
-        verbose=args.verbose
+        normalization_form=args.normalization_form
     )
