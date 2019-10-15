@@ -14,11 +14,10 @@ $ source bin/activate
 `dedup.py` can find candidate duplicate pairs in a way that avoids searching the full set of pair-wise combinations:
 
 ```
-(dedup) $ ./dedup.py -h
-usage: dedup.py [-h] [-n N_GRAM_SIZE] [-b {32,64,128}] [-r THRESHOLD] [-v]
+(dedup) $ $ ./dedup.py -h
+usage: dedup.py [-h] [-n N_GRAM_SIZE] [-b {32,64,128}] [-r THRESHOLD]
+                [-f {NFC,NFKC,NFD,NFKD}] [-t {.adm.json,.txt}]
                 filenames
-
-Find duplicate text documents from a list of filenames.
 
 positional arguments:
   filenames             file listing a set of filenames to check for
@@ -30,12 +29,18 @@ optional arguments:
   -n N_GRAM_SIZE, --n-gram-size N_GRAM_SIZE
                         size of character n-grams (default: 2)
   -b {32,64,128}, --bits {32,64,128}
-                        hash size (in bits) (default: 32)
+                        hash size (in bits) (default: 128)
   -r THRESHOLD, --threshold THRESHOLD
-                        threshold for considering two LSHs equivalent (lower
-                        thresholds are more strict; higher thresholds are more
-                        lenient) (default: 0.25)
-  -v, --verbose         print duplicate counts to stderr (default: False)
+                        minimum bitwise difference threshold for considering
+                        two LSHs equivalent (lower thresholds are more strict;
+                        higher thresholds are more lenient; thresholds must be
+                        between 0 and -b/--bits) (default: 128)
+  -f {NFC,NFKC,NFD,NFKD}, --normalization-form {NFC,NFKC,NFD,NFKD}
+                        Unicode normalization option; refer to
+                        unicodedata.normalize for explanation of options
+                        (default: NFKD)
+  -t {.adm.json,.txt}, --doc-type {.adm.json,.txt}
+                        the type of documents to compare (default: .txt)
 (dedup) $ find test -name "*.txt" | sort | xargs head
 ==> test/1.txt <==
 the cat sat in the hat
@@ -58,36 +63,30 @@ abcdefg
 ==> test/7.txt <==
 abcdefg
 hijklmnop
-(dedup) $ find test -name "*.txt" | ./dedup.py -
-100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 4237.89files/s]
-100%|██████████████████████████████████████████████████████████████████████████████████████████████| 32/32 [00:00<00:00, 27514.91rotations/s]
-test/1.txt	test/2.txt
-test/3.txt	test/4.txt
-test/3.txt	test/5.txt
-test/4.txt	test/5.txt
-test/7.txt	test/6.txt
-(dedup) $ find test -name "*.txt" | ./dedup.py - -b 64
-100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 3132.08files/s]
-100%|██████████████████████████████████████████████████████████████████████████████████████████████| 64/64 [00:00<00:00, 19870.86rotations/s]
-test/7.txt	test/6.txt
-test/1.txt	test/2.txt
-test/3.txt	test/4.txt
-test/3.txt	test/5.txt
-test/4.txt	test/5.txt
-(dedup) find test -name "*.txt" | ./dedup.py - -b 128
-100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 1759.25files/s]
-100%|████████████████████████████████████████████████████████████████████████████████████████████| 128/128 [00:00<00:00, 10996.50rotations/s]
-test/1.txt	test/2.txt
-test/3.txt	test/4.txt
-test/7.txt	test/6.txt
-(dedup) $ find test -name "*.txt" | ./dedup.py - -r 0.33 -b 128
-100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 1649.35files/s]
-100%|████████████████████████████████████████████████████████████████████████████████████████████| 128/128 [00:00<00:00, 10832.75rotations/s]
-test/1.txt	test/2.txt
-test/3.txt	test/4.txt
-test/3.txt	test/5.txt
-test/7.txt	test/6.txt
-test/4.txt	test/5.txt
+(dedup) $ find test -name '*.txt' | ./dedup.py -
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 1263.13files/s]
+test/1.txt	test/2.txt	17
+test/3.txt	test/6.txt	55
+test/3.txt	test/7.txt	56
+test/4.txt	test/6.txt	56
+test/2.txt	test/5.txt	58
+test/5.txt	test/7.txt	61
+(dedup) $ find test -name '*.txt' | ./dedup.py - -b 64 -r 64
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 2217.20files/s]
+test/3.txt	test/4.txt	4
+test/1.txt	test/2.txt	7
+test/7.txt	test/6.txt	12
+test/4.txt	test/5.txt	14
+test/3.txt	test/2.txt	29
+test/1.txt	test/6.txt	32
+(dedup) $ find test -name '*.txt' | ./dedup.py - -b 32 -r 32
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 4901.52files/s]
+test/3.txt	test/4.txt	3
+test/3.txt	test/5.txt	5
+test/1.txt	test/2.txt	6
+test/4.txt	test/6.txt	13
+test/5.txt	test/7.txt	13
+test/1.txt	test/6.txt	15
 ```
 
 If you have a list of filename pairs (such as the output from `dedup.py`), then `matching_substrings.py` can be used to inspect the substrings that match between the candidate files:
@@ -116,29 +115,8 @@ optional arguments:
                         (default is to report all substring matches) (default:
                         None)
   -j, --json            output as JSON lines (default is TSV) (default: False)
-(dedup) $ find test -name "*.txt" | ./dedup.py - -r 0.33 -b 128 | ./matching_substrings.py - -j | jq .
-100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 1655.68files/s]
-100%|████████████████████████████████████████████████████████████████████████████████████████████| 128/128 [00:00<00:00, 12382.85rotations/s]
-{
-  "1.filename": "test/1.txt",
-  "2.filename": "test/2.txt",
-  "1.startOffset": 0,
-  "1.endOffset": 12,
-  "2.startOffset": 0,
-  "2.endOffset": 12,
-  "text": "the cat sat ",
-  "size": 12
-}
-{
-  "1.filename": "test/1.txt",
-  "2.filename": "test/2.txt",
-  "1.startOffset": 13,
-  "1.endOffset": 19,
-  "2.startOffset": 13,
-  "2.endOffset": 19,
-  "text": "n the ",
-  "size": 6
-}
+(dedup) $ find test -name '*.txt' | ./dedup.py - -b 32 -r 32 | cut -f 1,2 | ./matching_substrings.py - -j | jq .
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 4758.53files/s]
 {
   "1.filename": "test/3.txt",
   "2.filename": "test/4.txt",
@@ -180,33 +158,23 @@ optional arguments:
   "size": 7
 }
 {
-  "1.filename": "test/7.txt",
-  "2.filename": "test/6.txt",
+  "1.filename": "test/1.txt",
+  "2.filename": "test/2.txt",
   "1.startOffset": 0,
-  "1.endOffset": 8,
+  "1.endOffset": 12,
   "2.startOffset": 0,
-  "2.endOffset": 8,
-  "text": "abcdefg\n",
-  "size": 8
+  "2.endOffset": 12,
+  "text": "the cat sat ",
+  "size": 12
 }
 {
-  "1.filename": "test/4.txt",
-  "2.filename": "test/5.txt",
-  "1.startOffset": 0,
-  "1.endOffset": 7,
-  "2.startOffset": 0,
-  "2.endOffset": 7,
-  "text": "we all ",
-  "size": 7
-}
-{
-  "1.filename": "test/4.txt",
-  "2.filename": "test/5.txt",
-  "1.startOffset": 7,
-  "1.endOffset": 13,
-  "2.startOffset": 16,
-  "2.endOffset": 22,
-  "text": "scream",
+  "1.filename": "test/1.txt",
+  "2.filename": "test/2.txt",
+  "1.startOffset": 13,
+  "1.endOffset": 19,
+  "2.startOffset": 13,
+  "2.endOffset": 19,
+  "text": "n the ",
   "size": 6
 }
 ```
@@ -218,139 +186,18 @@ The script uses locality sensitive hashing (LSH) to compare texts.  LSHs are a k
 Running `dedup.py` with the `-v/--verbose` option prints the binary values of the computed LSHs and shows the similarity scores:
 
 ```
+In [1]: from cityhash import CityHash32, CityHash64, CityHash128   
+
+In [2]: from dedup import simhash
 # 32 bit LSH
-(dedup) $ find test -name "*.txt" | ./dedup.py - -v
-100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 5169.95files/s]
-  0%|                                                                                                          | 0/32 [00:00<?, ?rotations/s]test/1.txt : the cat sat in the hat
-
-test/2.txt : the cat sat on the mat
-
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001001110100011100101111100010
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001001010100111101101110111010
-0.1875
-test/3.txt : we all scream for ice scream
-
-test/4.txt : we all scream for ice cream
-
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010001000010001111101100001011010
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010001000010001111101000101011110
-0.09375
-test/3.txt : we all scream for ice scream
-
-test/5.txt : we all like ice scream
-
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010001000010001111101100001011010
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010011000010011111101100011001110
-0.15625
-test/4.txt : we all scream for ice cream
-
-test/5.txt : we all like ice scream
-
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000011010001000010001111101000101011
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000011010011000010011111101100011001
-0.1875
-test/7.txt : abcdefg
-hijklmnop
-
-test/6.txt : abcdefg
-
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001101100000001101001111010110110
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001101000001000101001111010110001
-0.1875
-100%|██████████████████████████████████████████████████████████████████████████████████████████████| 32/32 [00:00<00:00, 17233.91rotations/s]
-found 1 duplicate(s) of file:  test/1.txt
-test/1.txt	test/2.txt
-found 2 duplicate(s) of file:  test/3.txt
-test/3.txt	test/4.txt
-test/3.txt	test/5.txt
-found 1 duplicate(s) of file:  test/4.txt
-test/4.txt	test/5.txt
-found 1 duplicate(s) of file:  test/7.txt
-test/7.txt	test/6.txt
-found 5 duplicate(s) in total
+In [3]: '{:0>32b}'.format(simhash('the cat sat in the hat', hashf=CityHash32))
+Out[3]: '00001001110100111100101111111010'
 # 64 bit LSH
-(dedup) $ find test -name "*.txt" | ./dedup.py - -v -b 64
-100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 3116.79files/s]
-  0%|                                                                                                          | 0/64 [00:00<?, ?rotations/s]test/7.txt : abcdefg
-hijklmnop
-
-test/6.txt : abcdefg
-
-00000000000000000000000000000000000000000000000000000000000000000000011110111011000101110111001001000010001001010011000101110100
-00000000000000000000000000000000000000000000000000000000000000000010011110011011111100110111000001000010000001010011001111011100
-0.1875
-test/1.txt : the cat sat in the hat
-
-test/2.txt : the cat sat on the mat
-
-00000000000000000000000000000000000000000000000000000000000000000011000110100111001010111010011101000000100011001101111110100010
-00000000000000000000000000000000000000000000000000000000000000000011000111100111100010111011011101000000100011001101111001100010
-0.109375
-test/3.txt : we all scream for ice scream
-
-test/4.txt : we all scream for ice cream
-
-00000000000000000000000000000000000000000000000000000000000000000101000000000111011010000000001000010000101010110001001001101001
-00000000000000000000000000000000000000000000000000000000000000000101000000000111011011001000001000010100101011110001001001101001
-0.0625
-test/4.txt : we all scream for ice cream
-
-test/5.txt : we all like ice scream
-
-00000000000000000000000000000000000000000000000000000000000000000101000000000111011011001000001000010100101011110001001001101001
-00000000000000000000000000000000000000000000000000000000000000000101000000001110011010000000001100010000100001011011001010001001
-0.21875
-test/3.txt : we all scream for ice scream
-
-test/5.txt : we all like ice scream
-
-00000000000000000000000000000000000000000000000000000000000000001100010010011010010101000000000111011010000000001000010000101010
-00000000000000000000000000000000000000000000000000000000000000000110110010100010010101000000001110011010000000001100010000100001
-0.1875
-100%|██████████████████████████████████████████████████████████████████████████████████████████████| 64/64 [00:00<00:00, 15947.92rotations/s]
-found 1 duplicate(s) of file:  test/7.txt
-test/7.txt	test/6.txt
-found 1 duplicate(s) of file:  test/1.txt
-test/1.txt	test/2.txt
-found 2 duplicate(s) of file:  test/3.txt
-test/3.txt	test/5.txt
-test/3.txt	test/4.txt
-found 1 duplicate(s) of file:  test/4.txt
-test/4.txt	test/5.txt
-found 5 duplicate(s) in total
-# 128 bit LSH
-(dedup) $ find test -name "*.txt" | ./dedup.py - -v -b 128
-100%|██████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 829.01files/s]
-  0%|                                                                                                         | 0/128 [00:00<?, ?rotations/s]test/1.txt : the cat sat in the hat
-
-test/2.txt : the cat sat on the mat
-
-00110000010010111010000110000100000111111100100001001000000000100110110000111010010001001001101101011010011000001110001010111001
-00111010010010111010110110000000000111111000100100111000000000100010110000010010010001001101101101010010011100001010001010111001
-0.1328125
-test/3.txt : we all scream for ice scream
-
-test/4.txt : we all scream for ice cream
-
-11110111010000001011001000010000101100100000101000010011110010000011011100100111100110111100110011011000101101000110100011000110
-11110111110000011011001000010000101100100000101000010011110010000111001110101111101110111100110011011000101101000110100011000110
-0.0546875
-test/7.txt : abcdefg
-hijklmnop
-
-test/6.txt : abcdefg
-
-01110101000101011011101010010001100110011100101001010010000100100010110010011011010001101000100100000001000011000011000011101000
-10011101110101011000101010010001110110010100111001111110000111101010100010011011010011101100100100110001101001011001000011110001
-0.2421875
-100%|█████████████████████████████████████████████████████████████████████████████████████████████| 128/128 [00:00<00:00, 6732.18rotations/s]
-found 1 duplicate(s) of file:  test/1.txt
-test/1.txt	test/2.txt
-found 1 duplicate(s) of file:  test/3.txt
-test/3.txt	test/4.txt
-found 1 duplicate(s) of file:  test/7.txt
-test/7.txt	test/6.txt
-found 3 duplicate(s) in total
+In [4]: '{:0>64b}'.format(simhash('the cat sat in the hat', hashf=CityHash64))
+Out[4]: '0011010110100111001010111110011101000010100111001101111110100010'
+#128 bit LSH
+In [5]: '{:0>128b}'.format(simhash('the cat sat in the hat', hashf=CityHash128))
+Out[5]: '00110010010110111010000110100100000111111101100011001010000000100110111000111010010101011001101101011011011000001110001010111001'
 ```
 
 After computing an LSH for each document, the list of documents are sorted by their LSH and pairs of adjacent LSHs in the list are compared.  If an adjacent pair's LSHs are similar enough (based on a threshold), then the pair is considered a duplicate.  Considering the sorted list of LSHs once is not sufficient however, because if a pair of documents have high bits that differ, but most bits are still the same, they won't be considered, because they will be unlikely to be adjacent in the sorted list.  To mitigate this, each LSH is rotated and the lists of LSHs are sorted again, and again adjacent pairs are checked.
@@ -370,12 +217,11 @@ But, if we use the strategy of rotating the LSHs, we can find duplicates in a re
 
 ```
 # <10 minutes is acceptable
-(dedup) $ find ~/Desktop/words -type f | ./dedup.py - -r 0.1 -b 128 >| ~/Desktop/duplicates.tsv 
+(dedup) $ find ~/Desktop/words -type f | ./dedup.py - -r 12 -b 128 >| ~/Desktop/duplicates.tsv 
 100%|███████████████████████████████████████████████████████████████████████████████████████████| 128959/128959 [00:35<00:00, 3623.02files/s]
-100%|███████████████████████████████████████████████████████████████████████████████████████████████| 128/128 [07:53<00:00,  3.08s/rotations]
 (dedup) $ wc -l ~/Desktop/duplicates.tsv 
     3841 /Users/zach/Desktop/duplicates.tsv
-(dedup) $ head ~/Desktop/duplicates.tsv | while read a b; do cat "$a"; cat "$b"; echo "-----"; done
+(dedup) $ head ~/Desktop/duplicates.tsv | while read a b r; do cat "$a"; cat "$b"; echo "-----"; done
 karait
 rait
 -----
