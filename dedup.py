@@ -7,6 +7,7 @@ import json
 from math import inf
 from operator import itemgetter
 from unicodedata import normalize
+from itertools import combinations
 
 from cityhash import CityHash32, CityHash64, CityHash128
 
@@ -131,7 +132,7 @@ def simdiff(a, b, bits=128):
     difference = sum(((xor & (1 << i)) > 0) for i in range(bits))
     return difference
 
-def pairs(documents, hashf=CityHash128):
+def pairs(documents, hashf=CityHash128, window=2):
     """Generate duplicate candidate pairs and their minimum bitwise difference
     scores.
     
@@ -147,18 +148,13 @@ def pairs(documents, hashf=CityHash128):
     for i in range(bits):
         def lsh(document):
             return rotate(document.lsh, i, width=bits)
-        for a, b in ngrams(
+        for ng in ngrams(
             sorted(documents, key=lsh),
-            n=2
+            n=window
         ):
-            a, b = sorted((a, b), key=document_sorter)
-            if (a, b) not in d:
+            for a, b in combinations(ng, 2):
+                a, b = sorted((a, b), key=document_sorter)
                 d[(a, b)] = simdiff(lsh(a), lsh(b), bits=bits)
-            else:
-                d[(a, b)] = min(
-                    d[(a, b)],
-                    simdiff(lsh(a), lsh(b), bits=bits)
-                )
     yield from sorted(d.items(), key=itemgetter(1))
 
 def load(
@@ -193,7 +189,8 @@ def main(
     n=2,
     hashf=CityHash128,
     normalization_form=None,
-    threshold=inf
+    threshold=inf,
+    window=10
 ):
     documents = load(
         filenames,
@@ -203,7 +200,7 @@ def main(
         normalization_form=normalization_form
     )
     writer = csv.writer(sys.stdout, dialect=csv.excel_tab)
-    for (a, b), score in pairs(documents, hashf=hashf):
+    for (a, b), score in pairs(documents, hashf=hashf, window=window):
         if score <= threshold:
             writer.writerow((a.filename, b.filename, score))
 
@@ -240,7 +237,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '-r',
         '--threshold',
-        type=int,
+        type=float,
         default=max(HASHES),
         help=(
             'minimum bitwise difference threshold for considering two LSHs '
@@ -265,6 +262,12 @@ if __name__ == '__main__':
         default='.txt',
         help='the type of documents to compare'
     )
+    parser.add_argument(
+        '-w', '--window',
+        type=int,
+        default=2,
+        help='window size to check for candidates in the sorted list of pairs',
+    )
     args = parser.parse_args()
     if not (args.threshold <= args.bits):
         print(
@@ -284,5 +287,7 @@ if __name__ == '__main__':
         doctype=DOCTYPES[args.doc_type],
         n=args.n_gram_size,
         hashf=HASHES[args.bits],
-        normalization_form=args.normalization_form
+        normalization_form=args.normalization_form,
+        threshold=args.threshold,
+        window=args.window
     )
