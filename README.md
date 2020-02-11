@@ -14,9 +14,9 @@ $ source bin/activate
 `dedup.py` can find candidate duplicate pairs in a way that avoids searching the full set of pair-wise combinations:
 
 ```
-(dedup) $ $ ./dedup.py -h
+(dedup) $ ./dedup.py -h
 usage: dedup.py [-h] [-n N_GRAM_SIZE] [-b {32,64,128}] [-r THRESHOLD]
-                [-f {NFC,NFKC,NFD,NFKD}] [-t {.adm.json,.txt}]
+                [-f {NFC,NFKC,NFD,NFKD}] [-t {.adm.json,.txt}] [-w WINDOW]
                 filenames
 
 positional arguments:
@@ -41,6 +41,9 @@ optional arguments:
                         (default: NFKD)
   -t {.adm.json,.txt}, --doc-type {.adm.json,.txt}
                         the type of documents to compare (default: .txt)
+  -w WINDOW, --window WINDOW
+                        window size to check for candidates in the sorted list
+                        of pairs (default: 2)
 (dedup) $ find test -name "*.txt" | sort | xargs head
 ==> test/1.txt <==
 the cat sat in the hat
@@ -64,7 +67,7 @@ abcdefg
 abcdefg
 hijklmnop
 (dedup) $ find test -name '*.txt' | ./dedup.py -
-100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 1263.13files/s]
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 1489.30files/s]
 test/1.txt	test/2.txt	17
 test/3.txt	test/6.txt	55
 test/3.txt	test/7.txt	56
@@ -72,7 +75,7 @@ test/4.txt	test/6.txt	56
 test/2.txt	test/5.txt	58
 test/5.txt	test/7.txt	61
 (dedup) $ find test -name '*.txt' | ./dedup.py - -b 64 -r 64
-100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 2217.20files/s]
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 2830.44files/s]
 test/3.txt	test/4.txt	4
 test/1.txt	test/2.txt	7
 test/7.txt	test/6.txt	12
@@ -80,7 +83,7 @@ test/4.txt	test/5.txt	14
 test/3.txt	test/2.txt	29
 test/1.txt	test/6.txt	32
 (dedup) $ find test -name '*.txt' | ./dedup.py - -b 32 -r 32
-100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 4901.52files/s]
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 4707.41files/s]
 test/3.txt	test/4.txt	3
 test/3.txt	test/5.txt	5
 test/1.txt	test/2.txt	6
