@@ -1,2 +1,2 @@
-cityhash==0.2.3.post9
-tqdm==4.31.1
+cityhash==0.4.6
+tqdm==4.64.1
